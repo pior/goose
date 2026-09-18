@@ -91,6 +91,19 @@ func TestNewServer(t *testing.T) {
 	assert.Nil(t, res)
 }
 
+func TestNewServerTimeouts(t *testing.T) {
+	tb := &tomb.Tomb{}
+	sl := FuncServlet("/", func(res http.ResponseWriter, req *http.Request) {})
+
+	s := NewServer(tb, "127.0.0.1:0", sl)
+
+	// Without a ReadHeaderTimeout, a client that sends incomplete headers
+	// holds the connection open forever (Slowloris).
+	srv := &s.(*server).server
+	assert.Equal(t, 5*time.Second, srv.ReadHeaderTimeout)
+	assert.Equal(t, 120*time.Second, srv.IdleTimeout)
+}
+
 func TestNewServerFromFactory(t *testing.T) {
 	logOutput := &syncio.Buffer{}
 	origOut := logrus.StandardLogger().Out

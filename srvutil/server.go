@@ -24,17 +24,26 @@ type Server interface {
 	Addr() *net.TCPAddr
 }
 
+// NewServer builds a Server with default timeouts:
+// ReadHeaderTimeout limits how long a client can take to send the request
+// headers, which blocks Slowloris attacks. IdleTimeout closes idle
+// keep-alive connections. Use NewServerFromFactory to set other values.
 func NewServer(t *tomb.Tomb, bind string, servlet Servlet) Server {
 	return NewServerFromFactory(t, servlet, func(handler http.Handler) http.Server {
-		return http.Server{ //nolint:gosec
-			Addr:    bind,
-			Handler: handler,
+		return http.Server{
+			Addr:              bind,
+			Handler:           handler,
+			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       120 * time.Second,
 		}
 	})
 }
 
 type ServerFactory func(handler http.Handler) http.Server
 
+// NewServerFromFactory builds a Server from the http.Server that the factory
+// returns. The caller is responsible for the http.Server timeouts: set at
+// least ReadHeaderTimeout to block Slowloris attacks.
 func NewServerFromFactory(t *tomb.Tomb, servlet Servlet, factory ServerFactory) Server {
 	router := mux.NewRouter()
 	servlet.RegisterRouting(router)
