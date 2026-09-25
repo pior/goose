@@ -2,7 +2,6 @@ package statetracker
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -49,6 +48,14 @@ func TestStateTracker_Wait(t *testing.T) {
 		assert.Fail(t, "should be waiting by now")
 	case <-waiting:
 	}
+
+	// The goroutine can signal waiting before it calls Wait. This delay lets
+	// Wait start to block before Set changes the state.
+	select {
+	case <-time.After(50 * time.Millisecond):
+	case <-ready:
+		assert.Fail(t, "should not yet be ready")
+	}
 	tracker.Set(true)
 
 	select {
@@ -61,7 +68,7 @@ func TestStateTracker_Wait(t *testing.T) {
 func TestStateTracker_Listener(t *testing.T) {
 	var runCount uint32
 	dead := make(chan struct{}, 1)
-	cond := sync.NewCond(&sync.Mutex{})
+	processed := make(chan struct{}, 1)
 
 	tracker := New(false)
 	listener := tracker.NewListener()
@@ -92,7 +99,7 @@ func TestStateTracker_Listener(t *testing.T) {
 			default:
 				assert.Fail(t, "should not be invoked more than 3 times")
 			}
-			cond.Signal()
+			processed <- struct{}{}
 		}
 		close(dead)
 	})()
@@ -100,22 +107,16 @@ func TestStateTracker_Listener(t *testing.T) {
 	assert.Equal(t, uint32(0), atomic.LoadUint32(&runCount))
 
 	tracker.Set(false)
-	cond.L.Lock()
-	cond.Wait()
+	<-processed
 	assert.Equal(t, uint32(1), atomic.LoadUint32(&runCount))
-	cond.L.Unlock()
 
 	tracker.Set(true)
-	cond.L.Lock()
-	cond.Wait()
+	<-processed
 	assert.Equal(t, uint32(2), atomic.LoadUint32(&runCount))
-	cond.L.Unlock()
 
 	tracker.Set(false)
-	cond.L.Lock()
-	cond.Wait()
+	<-processed
 	assert.Equal(t, uint32(3), atomic.LoadUint32(&runCount))
-	cond.L.Unlock()
 
 	tracker.RemoveListener(listener)
 	select {
